@@ -4,7 +4,7 @@
 #include "hardware/spi.h"
 #include "lora.h"
 
-// ==== Definições de pinos e porta SPI ====
+//Definições de pinos e porta SPI
 #define SPI_PORT spi0
 #define PIN_MISO 16
 #define PIN_CS   17
@@ -12,21 +12,23 @@
 #define PIN_MOSI 19
 #define PIN_RST  20
 
-// ==== Funções internas ====
-static inline void cs_select()   { gpio_put(PIN_CS, 0); }
-static inline void cs_deselect() { gpio_put(PIN_CS, 1); }
+//Funções internas
+static inline void cs_select()   { gpio_put(PIN_CS, 0); }   //Coloca o CS em 0, ou seja, ativo
+static inline void cs_deselect() { gpio_put(PIN_CS, 1); }   //Coloca o CS em 1, ou seja, inativo (encerra a transmissão)
 
+//Escreve no registrador passado por parametro
 static void lora_writeRegister(uint8_t reg, uint8_t data){
-    uint8_t buf[2] = { reg | 0x80, data };
+    uint8_t buf[2] = { reg | 0x80, data };  //1000 do 0x80 para indicar escrita, bit 7 como 1 (escrita)
     cs_select();
     spi_write_blocking(SPI_PORT, buf, 2);
     cs_deselect();
     sleep_ms(1);
 }
 
+//Le o registrador passado por parametro
 static uint8_t lora_readRegister(uint8_t addr){
     uint8_t data;
-    addr &= 0x7F;
+    addr &= 0x7F;   //garante o bit mais alto como 0 (leitura)
     cs_select();
     spi_write_blocking(SPI_PORT, &addr, 1);
     spi_read_blocking(SPI_PORT, 0, &data, 1);
@@ -35,6 +37,7 @@ static uint8_t lora_readRegister(uint8_t addr){
     return data;
 }
 
+//Reseta o modulo (No LoRa, 0 significa reset, logo devemos deixar em 1 para utilizar o modulo)
 static void lora_reset(void){
     gpio_put(PIN_RST, 0);
     sleep_ms(10);
@@ -42,6 +45,7 @@ static void lora_reset(void){
     sleep_ms(10);
 }
 
+//Configura a frequência, escrevendo os registradores correspondentes para ajustar o radio para a frequência desejada
 static void lora_setFrequency(double freqMHz){
     unsigned long freqReg = (unsigned long)(freqMHz * 7110656 / 434);
     lora_writeRegister(REG_FRF_MSB, (freqReg >> 16) & 0xFF);
@@ -49,9 +53,9 @@ static void lora_setFrequency(double freqMHz){
     lora_writeRegister(REG_FRF_LSB, freqReg & 0xFF);
 }
 
-// ==== Funções públicas ====
-void lora_init(void){
-    // Inicializa SPI e GPIOs
+//Funções públicas
+void lora_init(void){   //Função de inicialização do LoRa
+    //Inicializa SPI e GPIOs
     spi_init(SPI_PORT, 500 * 1000);
     gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
     gpio_set_function(PIN_SCK,  GPIO_FUNC_SPI);
@@ -66,51 +70,52 @@ void lora_init(void){
 
     lora_reset();
 
-    // Modo Sleep
+    //Modo Sleep
     lora_writeRegister(REG_OPMODE, RF95_MODE_SLEEP);
-    // Habilita LoRa
+    //Habilita LoRa
     lora_writeRegister(REG_OPMODE, 0x80);
 
-    // Frequência
+    //Frequência
     lora_setFrequency(915.0);
 
-    // Configurações de Modem
+    //Configurações de Modem
     lora_writeRegister(REG_MODEM_CONFIG,   BANDWIDTH_125K | ERROR_CODING_4_5 | EXPLICIT_MODE);
     lora_writeRegister(REG_MODEM_CONFIG2,  SPREADING_7 | CRC_ON);
     lora_writeRegister(REG_MODEM_CONFIG3,  0x04); // LDRO off, AGC on
 
-    // Preâmbulo
+    //Preâmbulo
     lora_writeRegister(REG_PREAMBLE_MSB, 0x00);
     lora_writeRegister(REG_PREAMBLE_LSB, 0x08);
 
-    // Payload máximo
+    //Payload máximo
     lora_writeRegister(REG_PAYLOAD_LENGTH, 255);
 
-    // FIFO TX base
+    //FIFO TX base
     lora_writeRegister(REG_FIFO_TX_BASE_AD, 0x00);
 
     printf("LoRa inicializado em 915 MHz.\n");
 }
 
+//Função de envio
 void lora_send(const char *msg){
     uint8_t len = strlen(msg);
-    if (len > 255) len = 255; // tamanho máximo permitido
+    if (len > 255) len = 255; //Tamanho máximo permitido
 
-    // Ponteiro FIFO para base TX
+    //Ponteiro FIFO para base TX
     lora_writeRegister(REG_FIFO_ADDR_PTR, 0x00);
 
-    // Escreve no FIFO
+    //Escreve no FIFO
     for (int i = 0; i < len; i++) {
         lora_writeRegister(REG_FIFO, msg[i]);
     }
 
-    // Define tamanho payload
+    //Define tamanho payload
     lora_writeRegister(REG_PAYLOAD_LENGTH, len);
 
-    // Entra em modo TX
+    //Entra em modo TX
     lora_writeRegister(REG_OPMODE, RF95_MODE_TX);
 
-    // Aguarda envio
+    //Aguarda envio
     while ((lora_readRegister(REG_IRQ_FLAGS) & 0x08) == 0);
     lora_writeRegister(REG_IRQ_FLAGS, 0x08); // limpa flag
 
