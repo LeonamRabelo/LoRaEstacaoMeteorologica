@@ -18,6 +18,7 @@
 #include "inc/matriz_leds.h"
 #include "aht20.h"
 #include "bmp280.h"
+#include "lora.h"
 
 #define WIFI_SSID "USER"   // Alterar para o SSID da rede
 #define WIFI_PASSWORD "PASSWORD" // Alterar para a senha da rede
@@ -180,6 +181,10 @@ void inicializar_componentes(){
     pwm_set_wrap(buzzer_slice, 999);
     pwm_set_gpio_level(BUZZER_PIN, 300);
     pwm_set_enabled(buzzer_slice, false);
+
+    //Inicializa LoRa para recepção
+    lora_init();
+    lora_setModeRx(); //Função que coloca o SX1276 em modo RX contínuo
 }
 
 //WebServer: Início no main()
@@ -441,54 +446,41 @@ int main(){
     snprintf(ip_str, sizeof(ip_str), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
     printf("IP: %s\n", ip_str); // Exibe o IP no serial monitor
 
-    //Estrutura para armazenar os dados do sensor
-    AHT20_Data data;
-    int32_t raw_temp_bmp;
-    int32_t raw_pressure;
-
-    char str_tmp1[10];  // Buffer para armazenar a string
-    char str_tmp2[10];  // Buffer para armazenar a string
-    char str_umi[10];  // Buffer para armazenar a string  
-    char str_pres[10];  // Buffer para armazenar a string  
+    // char str_tmp2[10];  // Buffer para armazenar a string
+    // char str_umi[10];  // Buffer para armazenar a string  
+    // char str_pres[10];  // Buffer para armazenar a string  
 
     while(true){
-        //Leitura do BMP280
-        bmp280_read_raw(I2C_PORT_SENSOR, &raw_temp_bmp, &raw_pressure);
-        float temperatura_bmp = bmp280_convert_temp(raw_temp_bmp, &bmp_params);
-        pressao = (bmp280_convert_pressure(raw_pressure, raw_temp_bmp, &bmp_params) / 100.0f) + offSet_pres;
-        //Leitura do AHT20
-        if(aht20_read(I2C_PORT_SENSOR, &data)){
-            printf("Temperatura AHT: %.2f C\n", data.temperature);
-            printf("Umidade: %.2f %%\n\n\n", data.humidity);
-            umidade = data.humidity + offSet_umid;
-        }
-        else{
-            printf("Erro na leitura do AHT20!\n\n\n");
-        }
+    char rx_buffer[64];
+    if(lora_receive(rx_buffer, sizeof(rx_buffer))){
+    sscanf(rx_buffer, "T:%f;U:%f;P:%f", &temperatura, &umidade, &pressao);
+    }
 
-        //Para enviar para o html, utilizei a media da soma dos dois sensores e jogar no grafico
-        temperatura = (((temperatura_bmp / 100.0f) + data.temperature) / 2.0f) + offSet_temp;
-        checar_alertas();
+    //Atualizar os dados dos sensores com o offset
+    temperatura += offSet_temp;
+    umidade += offSet_umid;
+    pressao += offSet_pres;
 
-        sprintf(str_tmp1, "%.1fC", temperatura_bmp / 100.0);  // Converte o inteiro em string
-        sprintf(str_tmp2, "%.1fC", data.temperature);  // Converte o inteiro em string
-        sprintf(str_umi, "%.1f%%", data.humidity);  // Converte o inteiro em string  
-        sprintf(str_pres, "%.1fh", pressao);  // Converte o inteiro em string      
+    checar_alertas();
+
+        // sprintf(str_tmp2, "%.1fC", data.temperature);  // Converte o inteiro em string
+        // sprintf(str_umi, "%.1f%%", data.humidity);  // Converte o inteiro em string  
+        // sprintf(str_pres, "%.1fh", pressao);  // Converte o inteiro em string      
     
-        //Atualiza o conteúdo do display com animações
-        ssd1306_fill(&ssd, false);                           // Limpa o display
-        ssd1306_rect(&ssd, 3, 3, 122, 60, true, false);       // Desenha um retângulo
-        ssd1306_line(&ssd, 3, 25, 123, 25, true);            // Desenha uma linha
-        ssd1306_line(&ssd, 3, 37, 123, 37, true);            // Desenha uma linha
-        ssd1306_draw_string(&ssd, "CEPEDI   TIC37", 8, 6);  // Desenha uma string
-        ssd1306_draw_string(&ssd, "EMBARCATECH", 20, 16);   // Desenha uma string
-        ssd1306_draw_string(&ssd, "BMP280  AHT20", 10, 28); // Desenha uma string
-        ssd1306_line(&ssd, 63, 25, 63, 60, true);            // Desenha uma linha vertical
-        ssd1306_draw_string(&ssd, str_tmp1, 14, 41);             // Desenha uma string
-        ssd1306_draw_string(&ssd, str_pres, 10, 52);             // Desenha uma string
-        ssd1306_draw_string(&ssd, str_tmp2, 73, 41);             // Desenha uma string
-        ssd1306_draw_string(&ssd, str_umi, 73, 52);            // Desenha uma string
-        ssd1306_send_data(&ssd);                        // Envia os dados para o display
+        // //Atualiza o conteúdo do display com animações
+        // ssd1306_fill(&ssd, false);                           // Limpa o display
+        // ssd1306_rect(&ssd, 3, 3, 122, 60, true, false);       // Desenha um retângulo
+        // ssd1306_line(&ssd, 3, 25, 123, 25, true);            // Desenha uma linha
+        // ssd1306_line(&ssd, 3, 37, 123, 37, true);            // Desenha uma linha
+        // ssd1306_draw_string(&ssd, "CEPEDI   TIC37", 8, 6);  // Desenha uma string
+        // ssd1306_draw_string(&ssd, "EMBARCATECH", 20, 16);   // Desenha uma string
+        // ssd1306_draw_string(&ssd, "BMP280  AHT20", 10, 28); // Desenha uma string
+        // ssd1306_line(&ssd, 63, 25, 63, 60, true);            // Desenha uma linha vertical
+        // ssd1306_draw_string(&ssd, str_tmp1, 14, 41);             // Desenha uma string
+        // ssd1306_draw_string(&ssd, str_pres, 10, 52);             // Desenha uma string
+        // ssd1306_draw_string(&ssd, str_tmp2, 73, 41);             // Desenha uma string
+        // ssd1306_draw_string(&ssd, str_umi, 73, 52);            // Desenha uma string
+        // ssd1306_send_data(&ssd);                        // Envia os dados para o display
 
         sleep_ms(500);
     }

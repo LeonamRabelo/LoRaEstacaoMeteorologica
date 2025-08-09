@@ -9,6 +9,8 @@
 
 void lora_init(void);
 void lora_send(const char *msg);
+void lora_setModeRx(void);
+bool lora_receive(char *buf, int maxlen);
 
 // Registradores
 #define REG_FIFO                    0x00

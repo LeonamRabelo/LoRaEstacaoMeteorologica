@@ -121,3 +121,34 @@ void lora_send(const char *msg){
 
     printf("LoRa TX -> %s\n", msg);
 }
+
+//Função que coloca o SX1276 em modo RX contínuo
+void lora_setModeRx(void){
+    lora_writeRegister(REG_OPMODE, RF95_MODE_RX_CONTINUOUS);
+}
+
+//Função de recepção para o RX
+bool lora_receive(char *buf, int maxlen){
+    //Verifica se há dado recebido (bit RX_DONE no REG_IRQ_FLAGS)
+    if(lora_readRegister(REG_IRQ_FLAGS) & 0x40){
+        //Ponteiro FIFO para onde o pacote está
+        uint8_t fifo_addr = lora_readRegister(REG_FIFO_RX_CURRENT_ADDR);
+        lora_writeRegister(REG_FIFO_ADDR_PTR, fifo_addr);
+
+        //Quantos bytes chegaram
+        uint8_t length = lora_readRegister(REG_RX_NB_BYTES);
+        if(length > maxlen) length = maxlen;
+
+        //Lê byte a byte
+        for(int i = 0; i < length; i++){
+            buf[i] = lora_readRegister(REG_FIFO);
+        }
+        buf[length] = '\0'; //Finaliza string
+
+        //Limpa flag RX_DONE
+        lora_writeRegister(REG_IRQ_FLAGS, 0x40);
+
+        return true; //Recebimento com sucesso
+    }
+    return false; //Nenhum dado
+}
