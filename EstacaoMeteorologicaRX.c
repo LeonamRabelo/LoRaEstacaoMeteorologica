@@ -45,6 +45,7 @@ float limite_pres_min = 900.0, limite_pres_max = 1020.0;    //Variáveis para ar
 float offSet_temp = 0.0f;                                   //Variável para armazenar o offset da temperatura
 float offSet_umid = 0.0f;                                   //Variável para armazenar o offset da umidade
 float offSet_pres = 0.0f;                                   //Variável para armazenar o offset da pressão
+uint32_t ultimo_timestamp_dados = 0;                        //Timestamp da última recepção de dados LoRa
 
 uint buzzer_slice;  //Variável para armazenar o slice do buzzer
 ssd1306_t ssd;  //Estrutura para armazenar os dados do display
@@ -61,6 +62,9 @@ const char HTML_TEMPLATE[] =
 "header{text-align:center;background:#01579b;color:white;padding:15px;font-size:1.8rem}"
 ".sensor{text-align:center;margin:15px 0}"
 ".sensor h2{margin:10px 0;font-size:1.2rem}"
+".status{margin:10px 0;padding:8px;background:#f0f0f0;border-radius:5px;font-weight:bold}"
+".status.online{background:#d4edda;color:#155724}"
+".status.offline{background:#f8d7da;color:#721c24}"
 ".limits{text-align:center;margin:20px auto}"
 ".limits input{width:80px;padding:5px;margin:5px}"
 ".limits label{margin:5px;display:inline-block}"
@@ -78,6 +82,7 @@ const char HTML_TEMPLATE[] =
 "<h2>Temperatura: <span id='temp'>--</span>°C</h2>"
 "<h2>Umidade: <span id='umi'>--</span>%%</h2>"
 "<h2>Pressão: <span id='pres'>--</span>hPa</h2>"
+"<div class='status'><span id='status-indicator'>🔴</span> Status: <span id='status-text'>Offline</span></div>"
 "</div>"
 
 "<div class='limits'>"
@@ -113,16 +118,31 @@ const char HTML_TEMPLATE[] =
 "document.getElementById('umi').textContent=data.umi.toFixed(2);"
 "document.getElementById('pres').textContent=data.pres.toFixed(2);"
 
+"const statusDiv=document.querySelector('.status');"
+"const statusIndicator=document.getElementById('status-indicator');"
+"const statusText=document.getElementById('status-text');"
+"if(data.online){"
+"statusDiv.className='status online';"
+"statusIndicator.textContent='🟢';"
+"statusText.textContent='Online';"
 "chartTemp.data.labels.push(''); chartTemp.data.datasets[0].data.push(data.temp);"
 "chartUmi.data.labels.push(''); chartUmi.data.datasets[0].data.push(data.umi);"
 "chartPres.data.labels.push(''); chartPres.data.datasets[0].data.push(data.pres);"
-
 "if(chartTemp.data.labels.length>20){"
 "chartTemp.data.labels.shift(); chartTemp.data.datasets[0].data.shift();"
 "chartUmi.data.labels.shift(); chartUmi.data.datasets[0].data.shift();"
 "chartPres.data.labels.shift(); chartPres.data.datasets[0].data.shift();}"
-
-"chartTemp.update(); chartUmi.update(); chartPres.update();}).catch(console.error);}"
+"chartTemp.update(); chartUmi.update(); chartPres.update();"
+"}else{"
+"statusDiv.className='status offline';"
+"statusIndicator.textContent='🔴';"
+"statusText.textContent='Offline - Sem dados LoRa';"
+"}}).catch(()=>{"
+"const statusDiv=document.querySelector('.status');"
+"statusDiv.className='status offline';"
+"document.getElementById('status-indicator').textContent='🔴';"
+"document.getElementById('status-text').textContent='Erro de conexão';"
+"});}"
 
 "const chartTemp=new Chart(document.getElementById('chartTemp'),{type:'line',data:{labels:[],datasets:[{label:'Temperatura (°C)',data:[],borderColor:'red'}]},options:{responsive:true,animation:false}});"
 "const chartUmi=new Chart(document.getElementById('chartUmi'),{type:'line',data:{labels:[],datasets:[{label:'Umidade (%)',data:[],borderColor:'blue'}]},options:{responsive:true,animation:false}});"
@@ -275,11 +295,15 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
     }
     //Verifica se a requisição e para /data
     else if (strncmp(req_buffer, "GET /data", 9) == 0){
-        char json[128];
-        //Cria o JSON com os dados atuais de temperatura, umidade e pressão
+        char json[256];
+        //Verifica se o sistema está online (dados recebidos nos últimos 10 segundos)
+        uint32_t current_time = to_ms_since_boot(get_absolute_time());
+        bool is_online = (ultimo_timestamp_dados > 0) && ((current_time - ultimo_timestamp_dados) < 10000);
+        
+        //Cria o JSON com os dados atuais de temperatura, umidade, pressão, timestamp e status
         snprintf(json, sizeof(json),
-            "{\"temp\":%.2f,\"umi\":%.2f,\"pres\":%.2f}",
-            temperatura, umidade, pressao);
+            "{\"temp\":%.2f,\"umi\":%.2f,\"pres\":%.2f,\"timestamp\":%lu,\"online\":%s,\"last_data\":%lu}",
+            temperatura, umidade, pressao, current_time, is_online ? "true" : "false", ultimo_timestamp_dados);
         //Envia
         tcp_write(tpcb, header_json, strlen(header_json), TCP_WRITE_FLAG_COPY);
         tcp_write(tpcb, json, strlen(json), TCP_WRITE_FLAG_COPY);
@@ -446,43 +470,48 @@ int main(){
     snprintf(ip_str, sizeof(ip_str), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
     printf("IP: %s\n", ip_str); // Exibe o IP no serial monitor
 
-    // char str_tmp2[10];  // Buffer para armazenar a string
-    // char str_umi[10];  // Buffer para armazenar a string  
-    // char str_pres[10];  // Buffer para armazenar a string  
+    char str_temp[12];  // Buffer para armazenar a string da temperatura
+    char str_umi[12];   // Buffer para armazenar a string da umidade
+    char str_pres[12];  // Buffer para armazenar a string da pressão
 
     while(true){
     char rx_buffer[64];
     if(lora_receive(rx_buffer, sizeof(rx_buffer))){
-    sscanf(rx_buffer, "T:%f;U:%f;P:%f", &temperatura, &umidade, &pressao);
-    }
+        float temp_raw, umi_raw, pres_raw;
+        sscanf(rx_buffer, "T:%f;U:%f;P:%f", &temp_raw, &umi_raw, &pres_raw);
 
-    //Atualizar os dados dos sensores com o offset
-    temperatura += offSet_temp;
-    umidade += offSet_umid;
-    pressao += offSet_pres;
+        //Aplicar os offsets apenas uma vez quando os dados são recebidos
+        temperatura = temp_raw + offSet_temp;
+        umidade = umi_raw + offSet_umid;
+        pressao = pres_raw + offSet_pres;
+        
+        //Atualiza o timestamp da última recepção de dados
+        ultimo_timestamp_dados = to_ms_since_boot(get_absolute_time());
+    }
 
     checar_alertas();
 
-        // sprintf(str_tmp2, "%.1fC", data.temperature);  // Converte o inteiro em string
-        // sprintf(str_umi, "%.1f%%", data.humidity);  // Converte o inteiro em string  
-        // sprintf(str_pres, "%.1fh", pressao);  // Converte o inteiro em string      
-    
-        // //Atualiza o conteúdo do display com animações
-        // ssd1306_fill(&ssd, false);                           // Limpa o display
-        // ssd1306_rect(&ssd, 3, 3, 122, 60, true, false);       // Desenha um retângulo
-        // ssd1306_line(&ssd, 3, 25, 123, 25, true);            // Desenha uma linha
-        // ssd1306_line(&ssd, 3, 37, 123, 37, true);            // Desenha uma linha
-        // ssd1306_draw_string(&ssd, "CEPEDI   TIC37", 8, 6);  // Desenha uma string
-        // ssd1306_draw_string(&ssd, "EMBARCATECH", 20, 16);   // Desenha uma string
-        // ssd1306_draw_string(&ssd, "BMP280  AHT20", 10, 28); // Desenha uma string
-        // ssd1306_line(&ssd, 63, 25, 63, 60, true);            // Desenha uma linha vertical
-        // ssd1306_draw_string(&ssd, str_tmp1, 14, 41);             // Desenha uma string
-        // ssd1306_draw_string(&ssd, str_pres, 10, 52);             // Desenha uma string
-        // ssd1306_draw_string(&ssd, str_tmp2, 73, 41);             // Desenha uma string
-        // ssd1306_draw_string(&ssd, str_umi, 73, 52);            // Desenha uma string
-        // ssd1306_send_data(&ssd);                        // Envia os dados para o display
+    // Formatar strings com os dados dos sensores
+    sprintf(str_temp, "%.1fC", temperatura);   // Converte a temperatura em string
+    sprintf(str_umi, "%.1f%%", umidade);       // Converte a umidade em string  
+    sprintf(str_pres, "%.0fhPa", pressao);     // Converte a pressão em string      
 
-        sleep_ms(500);
+    // Atualiza o conteúdo do display
+    ssd1306_fill(&ssd, false);                           // Limpa o display
+    ssd1306_rect(&ssd, 3, 3, 122, 60, true, false);      // Desenha um retângulo
+    ssd1306_line(&ssd, 3, 25, 123, 25, true);            // Desenha uma linha
+    ssd1306_line(&ssd, 3, 37, 123, 37, true);            // Desenha uma linha
+    ssd1306_draw_string(&ssd, "CEPEDI   TIC37", 8, 6);   // Desenha uma string
+    ssd1306_draw_string(&ssd, "EMBARCATECH", 20, 16);    // Desenha uma string
+    ssd1306_draw_string(&ssd, "Est. Meteorologica", 5, 28); // Desenha uma string
+    ssd1306_line(&ssd, 63, 25, 63, 60, true);            // Desenha uma linha vertical
+    ssd1306_draw_string(&ssd, str_temp, 14, 41);         // Desenha a temperatura
+    ssd1306_draw_string(&ssd, str_pres, 8, 52);          // Desenha a pressão
+    ssd1306_draw_string(&ssd, str_umi, 73, 41);          // Desenha a umidade
+    ssd1306_draw_string(&ssd, ip_str, 68, 52);           // Desenha o IP
+    ssd1306_send_data(&ssd);                             // Envia os dados para o display
+
+    sleep_ms(500);
     }
     return 0;
 }
