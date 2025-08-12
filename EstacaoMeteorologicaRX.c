@@ -475,43 +475,43 @@ int main(){
     char str_pres[12];  // Buffer para armazenar a string da pressão
 
     while(true){
-    char rx_buffer[64];
-    if(lora_receive(rx_buffer, sizeof(rx_buffer))){
-        float temp_raw, umi_raw, pres_raw;
-        sscanf(rx_buffer, "T:%f;U:%f;P:%f", &temp_raw, &umi_raw, &pres_raw);
+        char rx_buffer[64];
+        if(lora_receive(rx_buffer, sizeof(rx_buffer))){
+            float temp_raw, umi_raw, pres_raw;
+            sscanf(rx_buffer, "T:%f;U:%f;P:%f", &temp_raw, &umi_raw, &pres_raw);
 
-        //Aplicar os offsets apenas uma vez quando os dados são recebidos
-        temperatura = temp_raw + offSet_temp;
-        umidade = umi_raw + offSet_umid;
-        pressao = pres_raw + offSet_pres;
-        
-        //Atualiza o timestamp da última recepção de dados
-        ultimo_timestamp_dados = to_ms_since_boot(get_absolute_time());
-    }
+            //Aplicar os offsets apenas uma vez quando os dados são recebidos
+            temperatura = temp_raw + offSet_temp;
+            umidade = umi_raw + offSet_umid;
+            pressao = pres_raw + offSet_pres;
+            
+            //Atualiza o timestamp da última recepção de dados
+            ultimo_timestamp_dados = to_ms_since_boot(get_absolute_time());
+        }
 
-    checar_alertas();
+        checar_alertas();
 
-    // Formatar strings com os dados dos sensores
-    sprintf(str_temp, "%.1fC", temperatura);   // Converte a temperatura em string
-    sprintf(str_umi, "%.1f%%", umidade);       // Converte a umidade em string  
-    sprintf(str_pres, "%.0fhPa", pressao);     // Converte a pressão em string      
+        // Formatar strings com os dados dos sensores
+        sprintf(str_temp, "%.1fC", temperatura);   // Converte a temperatura em string
+        sprintf(str_umi, "%.1f%%", umidade);       // Converte a umidade em string  
+        sprintf(str_pres, "%.0fhPa", pressao);     // Converte a pressão em string      
 
-    // Atualiza o conteúdo do display
-    ssd1306_fill(&ssd, false);                           // Limpa o display
-    ssd1306_rect(&ssd, 3, 3, 122, 60, true, false);      // Desenha um retângulo
-    ssd1306_line(&ssd, 3, 25, 123, 25, true);            // Desenha uma linha
-    ssd1306_line(&ssd, 3, 37, 123, 37, true);            // Desenha uma linha
-    ssd1306_draw_string(&ssd, "CEPEDI   TIC37", 8, 6);   // Desenha uma string
-    ssd1306_draw_string(&ssd, "EMBARCATECH", 20, 16);    // Desenha uma string
-    ssd1306_draw_string(&ssd, "Est. Meteorologica", 5, 28); // Desenha uma string
-    ssd1306_line(&ssd, 63, 25, 63, 60, true);            // Desenha uma linha vertical
-    ssd1306_draw_string(&ssd, str_temp, 14, 41);         // Desenha a temperatura
-    ssd1306_draw_string(&ssd, str_pres, 8, 52);          // Desenha a pressão
-    ssd1306_draw_string(&ssd, str_umi, 73, 41);          // Desenha a umidade
-    ssd1306_draw_string(&ssd, ip_str, 68, 52);           // Desenha o IP
-    ssd1306_send_data(&ssd);                             // Envia os dados para o display
+        // Atualiza o conteúdo do display
+        ssd1306_fill(&ssd, false);                           // Limpa o display
+        ssd1306_rect(&ssd, 3, 3, 122, 60, true, false);      // Desenha um retângulo
+        ssd1306_line(&ssd, 3, 25, 123, 25, true);            // Desenha uma linha
+        ssd1306_line(&ssd, 3, 37, 123, 37, true);            // Desenha uma linha
+        ssd1306_draw_string(&ssd, "CEPEDI   TIC37", 8, 6);   // Desenha uma string
+        ssd1306_draw_string(&ssd, "EMBARCATECH", 20, 16);    // Desenha uma string
+        ssd1306_draw_string(&ssd, "Est. Meteorologica", 5, 28); // Desenha uma string
+        ssd1306_line(&ssd, 63, 25, 63, 60, true);            // Desenha uma linha vertical
+        ssd1306_draw_string(&ssd, str_temp, 14, 41);         // Desenha a temperatura
+        ssd1306_draw_string(&ssd, str_pres, 8, 52);          // Desenha a pressão
+        ssd1306_draw_string(&ssd, str_umi, 73, 41);          // Desenha a umidade
+        ssd1306_draw_string(&ssd, ip_str, 68, 52);           // Desenha o IP
+        ssd1306_send_data(&ssd);                             // Envia os dados para o display
 
-    sleep_ms(500);
+        sleep_ms(500);
     }
     return 0;
 }
